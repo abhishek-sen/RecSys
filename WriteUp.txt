@@ -1,0 +1,144 @@
+
+Problem Formulation:
+-------------------
+
+Given a sparse ratings matrix of M users and N movies, we want to recommend movies to a new user based on a set of ratings that he has provided.
+In this implementation this recommendation algorithm is formulated and solved as a matrix completion problem. 
+
+Usage as a recommendation system:
+--------------------------------
+
+If information (user provided ratings) about a new set of users, U, is given to us, we introduce |U| rows in the original ratings matrix and solve
+the matrix completion problem, after necessary preprocessing of the updated matrix.
+
+This would give us a complete row corresponding to each user in U. We rank the generated movie ratings and recommend top-K entries to the user that
+he has not rated before.
+
+Advantage of this approach : 
+--------------------------
+
+	1. We get recommendations for several new users simulateanouesly. In context of this problem, real-time recommendation is probably not 
+	necessary.
+	2. Because of estimating the matrix jointly across all users, information is effectively propagated through complex shared subspaces. So
+	ratings by one user helps in recommending movie to the other.
+	3. Recommendations for older users in the system evolves over time.
+
+Algorithm :
+----------
+
+1) Divide the user provided ratings into training and test set. I experimented with various train/test split ratios and results are shown using 
+a plot as provided in the source directory.
+
+2) Remove bias from the data set before matrix completion. Sources of bias are
+	a) Average rating, mu, across the entire dataset
+	b) Average rating, bu, for an user, u, across all movies
+	c) Average rating, bi, for a movie, i, across all users
+
+	So for matrix entry (u,i), the bias, b(u,i) = mu + bu + bi
+   Bias is removed by subtracting the bias matrix from the ratings matrix. We perform the subtraction only for the entries for which we have user ratings.
+   At the end of this step, we have the unbiased sparse matrix, Y.
+
+
+3) Now we perform the matrix completion by using the approach in the following paper :
+		http://arxiv.org/pdf/1404.1377v2.pdf
+   
+    Overview of the approach (look at the Algorithms in the paper for rigorous details) : 
+
+    Complete the ratings matrix as a linear combination of rank-one basis 
+	matrices. In each step,k, a new rank-one matrix is estimated 
+	based on previous (k-1) rank-one basis matrices, while minimizing the 
+	reconstruction error over the observed entries.
+
+	Each step  involves :
+
+	1. Solving low rank SVD on a residual matrix to estimate the left and right
+	singular-vectors corresponding to the highest singular value. This generates 
+	a new rank-1 matrix in each step. [Residual matrix = Difference between
+	observed and reconstructed matrix. Entries of this matrix are projected on to
+	the set of observed entries.]
+
+	2. Solving a set of linear-equations to iteratively re-estimate the 
+	coefficients of each basis matrix, so that linear combination of the bases
+	match the observed entries in the ratings matrix.
+
+	Reconstruction of the complete matrix at the end of k-th iteration is given by
+
+	        X(k) = theta_0*M(0) + theta_1*M(1) + ... + theta_k*M(k) 
+
+	This algorithm is referred to as "Orthogonal Rank-One Matrix Pursuit ", shown
+	as Algorithm 1 on the paper.
+
+	Issue : 
+
+	Above algorithm is memory intensive because at the end of every step, we solve 
+	a large system of linear equation to iteratively re-estimate the coefficients of
+	basis matrices to minimize reconstruction error on the observed entries.
+
+	In the economic version of the algorithm we don't completely re-estimate the 
+	coefficients of previous (k-1) basis matrices during step k. Instead we look at
+	the following reconstruction at the end of k-th iteration.
+
+	        X(k) = alpha_1*X(k-1) + alpha_2*M(k)
+	        
+	Subsequently, we update the parameters as 
+	        theta_k = alpha_2
+	        theta_i = alpha_1 * theta_i, for i < k
+
+	Because of this the linear-equation system is considerably light-weight and 
+	easy to compute. This version is known as "Economic Orthogonal Rank-One Matrix Pursuit" (ER1MP)
+	(Algorithm 2 in the paper).
+
+4) Once the missing entries are estimated using step 3. Biases are added back to the individual
+matrix entry to produce the final ratings.
+
+
+
+Observation :
+----------
+
+All the experiments are done with ER1MP algorithm.
+'RMSE_econ_TestSplits.png' shows the outcome of the completion by showing the role of the 
+test-split size and number of iterations on the RMSE.
+
+In this algorithm, the number of rank-1 basis matrices, used for reconstruction, is a tunable 
+parameter. As seen in the experimental plot, if we have larger test-split, we have 
+better Root Mean Square Error (RMSE) using smaller number of basis matrices. For example,
+if test set is 50% of user ratings, number of basis matrices for optimal reconstruction is ~ 9. 
+Similarly, if test set is 10% of user ratings, number of basis matrices ~20. 
+
+We observe that optimal RMSE for each test-split decreases as we reduce the size of the test-set.
+This is a sanity check,  that shows, having more training data is improving the prediction. 
+
+We also observe that the RMSE doesn't go too high even if  we have test-set size of 50%. RMSE ~ 0.921.
+For test-set size of 10%, RMSE ~ 0.89. This shows that the completion degrades gracefully as number 
+of training datapoints decreases.
+
+Computation Resource :
+---------------------
+
+The algorithm performs efficiently with small amount of RAM compared to other collaborative filtering
+algorithms. In a machine with 8 GB RAM, 2.3 GHz, each matrix completion task takes about 10 minutes.
+This would ensure that the algorithm will scale reasonably to a much larger dataset.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
